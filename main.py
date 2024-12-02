@@ -10,7 +10,14 @@ mesh_f = torch.tensor(mesh.faces())
 mesh_v = torch.tensor(mesh.vertices)
 
 numero = rt.Numerology("up","FR1.n41")
-ant_tx = rt.Antenna(num_hor = 8,
-                    num_ver = 4,
-                    intv_hor = numero.wavelength/2,
-                    intv_ver = numero.wavelength/2)
+ant_bs_tx = rt.Antenna(8,
+                       4,
+                       intv_hor = 1/2,
+                       intv_ver = 1/2,
+                       numerology = numero)
+ant_bs_rx = ant_bs_tx
+ant_ue_tx = rt.Antenna(1,
+                       1,
+                       numerology = numero)
+
+ant_ue_rx = ant_ue_tx
