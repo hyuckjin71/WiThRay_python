@@ -21,7 +21,7 @@ mesh = import_mesh(mesh_file, device, rotation_dir = torch.tensor([0.8409, -0.54
 # mesh_file.show()
 
 nmr = [Numerology("up","FR1.n41")]
-ant_bs  = [Antenna(4,2, nmr = nmr[0]),]
+ant_bs  = [Antenna(1,2, nmr = nmr[0]),]
 ant_ris = [Antenna(8,8, intv_hor = 0.1, intv_ver = 0.1, nmr = nmr[0]),]
 ant_ue  = [Antenna(1,1, nmr = nmr[0]),]
 

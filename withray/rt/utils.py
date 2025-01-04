@@ -27,8 +27,9 @@ def import_mesh(mesh_file, device, rotation_dir = torch.tensor([1.0, 0.0, 0.0]))
     mesh_v = torch.tensor(mesh_file.vertices)[:, [0, 2, 1]] * torch.tensor([-1, 1, 1])
     mesh_v = mesh_v.to(dtype=torch.float32)
 
-    rotation_dir = torch.tensor([rotation_dir[0], rotation_dir[1], 0.0])
-    rotation_dir = rotation_dir / torch.norm(rotation_dir)
+    rotation_dir = F.normalize(
+        torch.tensor([rotation_dir[0], rotation_dir[1], 0.0])
+        , p=2, dim=0)
     rotation_mat = torch.cat([
         rotation_dir.unsqueeze(0),
         torch.tensor([-rotation_dir[1], rotation_dir[0], 0.0]).unsqueeze(0),
@@ -118,27 +119,20 @@ def inverse_mat(mat_a):
 
 def sorted_inv_s(mesh, pnts):
 
-    mesh_v = torch.tensor(mesh.vertices)[:,[0,2,1]] * torch.tensor([-1, 1, 1])
-    rotation_mat = torch.tensor([[0.8408, -0.5411, 0.0160],[0.5411, 0.8408, 0.0160],[0.0, 0.0, 1.0]])
-    mesh_v = rotation_mat @ mesh_v
-
-    mesh_f = torch.tensor(mesh.faces())
-    mat_s = mesh_v[mesh_f].permute(2,1,0).to(dtype=torch.float32, device=pnts.device)
-    mesh_n = mesh_normals(mesh).to(dtype=torch.float32, device=pnts.device)
-
     if pnts.ndim < 3:
         pnts = pnts.unsqueeze(-1)
     if pnts.ndim < 4:
         pnts = pnts.unsqueeze(-1)
 
-    inv_s = inverse_mat(mat_s.unsqueeze(-1) - pnts.permute(0,2,3,1))
-    area_s = torch.cross(mat_s[:,0,:]-mat_s[:,1,:], mat_s[:,2,:]-mat_s[:,1,:], dim=0)
-    dir_s = pnts - torch.mean(mat_s.unsqueeze(-1), dim=1, keepdim=True)
+    inv_s = inverse_mat(mesh["s"].unsqueeze(-1) - pnts.permute(0,2,3,1))
+    area_s = torch.cross(mesh["s"][:,0,:]-mesh["s"][:,1,:], mesh["s"][:,2,:]-mesh["s"][:,1,:], dim=0)
+    area_s = torch.norm(area_s, p=2, dim=0)
+    dir_s = pnts - torch.mean(mesh["s"].unsqueeze(-1), dim=1, keepdim=True)
     norm_dir_s = torch.linalg.norm(dir_s, ord=2, dim=0, keepdim=True)
-    dir_s = dir_s / norm_dir_s**2 / dir_s[2,:,:,:]**0.5
-    area_s = area_s * torch.abs(torch.sum(mesh_n.unsqueeze(-1).permute(0,2,1).unsqueeze(-1) * dir_s))
+    dir_s = dir_s / norm_dir_s**4 / torch.abs(dir_s[2,:,:,:]).unsqueeze(0)**0.5
+    area_s = area_s.unsqueeze(0).unsqueeze(-1) * torch.abs(torch.sum(mesh["n"].unsqueeze(-1).permute(0,2,1).unsqueeze(-1) * dir_s, dim=0))
 
-    _,idx_sorted = torch.sort(torch.mean(area_s, dim=0))
+    _,idx_sorted = torch.sort(torch.mean(area_s, dim=0).squeeze(), descending=True)
     inv_s = inv_s[:,:,idx_sorted,:]
 
     return inv_s
