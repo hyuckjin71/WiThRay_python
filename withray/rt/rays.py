@@ -36,7 +36,7 @@ class RAYS:
         num_f = inv_s_tx.shape[2]
         inv_s_tx = inv_s_tx.permute(0,1,3,2).reshape(3,3,-1).permute(1,0,2).unsqueeze(-1)
         pnts_tx = pnts_tx.unsqueeze(-1).unsqueeze(-1).permute(0,2,3,1).unsqueeze(-1)
-        pnts_v = mesh["v"].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).permute(1,2,3,4,0).to(dtype=torch.float32, device=pnts_tx.device)
+        pnts_v = mesh.v.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).permute(1,2,3,4,0).to(dtype=torch.float32, device=pnts_tx.device)
 
         msk_in = torch.zeros(pnts_tx.shape[3], pnts_v.shape[4], dtype=torch.bool, device=pnts_tx.device)
 
@@ -44,15 +44,15 @@ class RAYS:
         idx = 0
 
         while idx < num_f and torch.sum(~msk_in) != 0:
-            blck_size = int(torch.ceil(1e6 / torch.sum(~msk_in)))
+            blck_size = int(torch.ceil(2e7 / torch.sum(~msk_in)))
             start_idx = idx + 1
             end_idx = min(idx + blck_size, num_f)
             idc = torch.arange(start_idx, end_idx+1, dtype=torch.long) - 1
 
             k = torch.sum(inv_s_tx[:,:,idc] * dir[:,:,:,~msk_in], axis=0)
             msk_in[~msk_in] = torch.any((torch.sum(k, axis=0) > 1) & torch.all(k > 0, axis=0), axis=0)
-
             # print("{}, {}".format(torch.sum(msk_in).item(), torch.sum(~msk_in).item()))
+
             idx = end_idx
 
         return msk_in

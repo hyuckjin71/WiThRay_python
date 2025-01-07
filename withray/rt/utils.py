@@ -5,49 +5,6 @@ Ray tracer utilities
 import torch
 import torch.nn.functional as F
 
-def mesh_normals(mesh_s):
-
-    v1 = mesh_s[:,0,:]
-    v2 = mesh_s[:,1,:]
-    v3 = mesh_s[:,2,:]
-
-    d1 = v2 - v1
-    d1 = F.normalize(d1, p=2, dim=0)
-
-    d2 = v3 - v1
-    d2 = F.normalize(d2, p=2, dim=0)
-
-    mesh_n = torch.cross(d1, d2, dim=0)
-    mesh_n = F.normalize(mesh_n, p=2, dim=0)
-
-    return mesh_n
-
-def import_mesh(mesh_file, device, rotation_dir = torch.tensor([1.0, 0.0, 0.0])):
-
-    mesh_v = torch.tensor(mesh_file.vertices)[:, [0, 2, 1]] * torch.tensor([-1, 1, 1])
-    mesh_v = mesh_v.to(dtype=torch.float32)
-
-    rotation_dir = F.normalize(
-        torch.tensor([rotation_dir[0], rotation_dir[1], 0.0])
-        , p=2, dim=0)
-    rotation_mat = torch.cat([
-        rotation_dir.unsqueeze(0),
-        torch.tensor([-rotation_dir[1], rotation_dir[0], 0.0]).unsqueeze(0),
-        torch.tensor([0.0, 0.0, 1]).unsqueeze(0)
-    ], dim=0).to(dtype=torch.float32)
-    mesh_v = mesh_v @ rotation_mat.T
-
-    mesh_f = torch.tensor(mesh_file.faces(), dtype=torch.long)
-
-    mesh_s = mesh_v[mesh_f].permute(2, 1, 0)
-
-    mesh = {"v":mesh_v.to(device=device),
-            "f":mesh_f.to(device=device),
-            "s":mesh_s.to(device=device),
-            "n":mesh_normals(mesh_s).to(dtype=torch.float32, device=device)}
-
-    return mesh
-
 def inverse_mat(mat_a):
     """
     Compute the inverse of multiple 3x3 matrices in blocks.
@@ -124,10 +81,10 @@ def sorted_inv_s(mesh, pnts):
     if pnts.ndim < 4:
         pnts = pnts.unsqueeze(-1)
 
-    inv_s = inverse_mat(mesh["s"].unsqueeze(-1) - pnts.permute(0,2,3,1))
-    area_s = torch.cross(mesh["s"][:,0,:]-mesh["s"][:,1,:], mesh["s"][:,2,:]-mesh["s"][:,1,:], dim=0)
+    inv_s = inverse_mat(mesh.s.unsqueeze(-1) - pnts.permute(0,2,3,1))
+    area_s = torch.cross(mesh.s[:,0,:]-mesh.s[:,1,:], mesh.s[:,2,:]-mesh.s[:,1,:], dim=0)
     area_s = torch.norm(area_s, p=2, dim=0)
-    dir_s = pnts - torch.mean(mesh["s"].unsqueeze(-1), dim=1, keepdim=True)
+    dir_s = pnts - torch.mean(mesh.s.unsqueeze(-1), dim=1, keepdim=True)
     norm_dir_s = torch.linalg.norm(dir_s, ord=2, dim=0, keepdim=True)
     dir_s = dir_s / norm_dir_s**4 / torch.abs(dir_s[2,:,:,:]).unsqueeze(0)**0.5
     area_s = area_s.unsqueeze(0).unsqueeze(-1) * torch.abs(torch.sum(mesh["n"].unsqueeze(-1).permute(0,2,1).unsqueeze(-1) * dir_s, dim=0))

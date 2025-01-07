@@ -1,7 +1,6 @@
 from vedo import *
 import torch
-from withray.rt import Numerology, Antenna, BS, RIS, UE, RAYS
-from withray.rt.utils import import_mesh
+from withray.rt import Numerology, Antenna, BS, RIS, UE, RAYS, MESH
 
 # Select the device for acceleration
 if torch.cuda.is_available():
@@ -14,8 +13,9 @@ else:
     device = torch.device("cpu")
     print("Using CPU")
 
-mesh_file = Mesh("map_data/Manhattan.obj",)
-mesh = import_mesh(mesh_file, device, rotation_dir = torch.tensor([0.8409, -0.5411, 0.0]))
+mesh = MESH("map_data/Manhattan.obj",
+            device,
+            rotation_dir = torch.tensor([0.8409, -0.5411, 0.0]))
 
 # mesh_file.texture("map_data/Manhattan.png", scale = 1)
 # mesh_file.show()

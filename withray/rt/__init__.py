@@ -9,4 +9,5 @@ from .ris import RIS
 from .numerology import Numerology
 from .antenna import Antenna
 from .rays import RAYS
+from .mesh import MESH
 from .utils import *
