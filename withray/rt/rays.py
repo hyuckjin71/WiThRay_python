@@ -2,7 +2,7 @@
 Classes and Methods for RAYS.
 """
 import torch
-from withray.rt import Tx, Rx
+from withray.rt import Tx, Rx, line_pnt_intersect
 from withray.rt.utils import sorted_inv_s
 
 class RAYS:
@@ -32,6 +32,8 @@ class RAYS:
     @staticmethod
     def compute_rays(pnts_tx, pnts_rx, mesh):
 
+        msk_in = line_pnt_intersect(pnts_tx, mesh.v, mesh)
+
         inv_s_tx = sorted_inv_s(mesh, pnts_tx)
         num_f = inv_s_tx.shape[2]
         inv_s_tx = inv_s_tx.permute(0,1,3,2).reshape(3,3,-1).permute(1,0,2).unsqueeze(-1)
@@ -56,3 +58,5 @@ class RAYS:
             idx = end_idx
 
         return msk_in
+
+

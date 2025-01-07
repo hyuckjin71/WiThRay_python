@@ -93,3 +93,133 @@ def sorted_inv_s(mesh, pnts):
     inv_s = inv_s[:,:,idx_sorted,:]
 
     return inv_s
+
+def line_pnt_intersect(pnts1, pnts2, mesh):
+
+    msk_in = torch.zeros(pnts1.shape[0], pnts2.shape[0], dtype=torch.bool)
+
+    box_blob = torch.tensor(
+        [mesh.v[:, 0].min(),
+         mesh.v[:, 1].min(),
+         mesh.v[:, 2].min(),
+         mesh.v[:, 0].max() - mesh.v[:, 0].min(),
+         mesh.v[:, 1].max() - mesh.v[:, 1].min(),
+         mesh.v[:, 2].max() - mesh.v[:, 2].min()]
+    )
+
+    msk_in = bvh_algorithm(msk_in, mesh, pnts1, pnts2, torch.zeros(1,3), ~msk_in, 1, box_blob)
+
+    return msk_in
+
+def bvh_algorithm(msk_in, mesh, pnts1, pnts2, msk_box_prev, msk_prev, level, box_blob):
+
+    msk_box = torch.tensor([
+        [0, 0, 0],
+        [1, 0, 0],
+        [1, 1, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+        [1, 0, 1],
+        [1, 1, 1],
+        [0, 1, 1]
+    ])
+
+    for i in range(8):
+        msk_box_ = msk_box_prev + msk_box[i,:] / 2**level
+        box_blob_ = box_blob[:2].T + box_blob[3:6] * (msk_box_ + msk_box/2**level)
+
+        i1, i2 = torch.where(msk_prev)
+
+        msk_line = msk_prev.clone()
+        msk_line[msk_line] = line_cross_box(pnts1[i1,:], pnts2[i2,:], box_blob)
+
+        i1, i2 = torch.where(msk_line)
+
+        msk_f = torch.any(
+            pnts_in_cube(mesh.s, box_blob).view(3, -1), dim=0
+        )
+
+        if torch.sum(msk_f) * torch.sum(msk_line) < 4e7:
+            msk_in[msk_line] = msk_in[msk_line] | torch.squeeze(
+                pnts_in_surfaces(mesh.s, msk_f,
+                                 pnts1[i1,:].T.view(3,1,1,-1),
+                                 pnts2[i2,:].T.view(3,1,1,-1))
+            )
+        else:
+            msk_in = bvh_algorithm(msk_in, mesh, pnts1, pnts2, msk_box_, msk_line, level+1, box_blob)
+
+    return msk_in
+
+def pnts_in_surfaces(mesh, msk_f, pnts1, pnts2):
+
+    ratio_intersect = torch.sum(
+        (pnts2 - mesh.s[:,0,msk_f].unsqueeze(1)) * mesh.n[msk_f,:].T.unsqueeze(-1),
+    dim=0) / torch.sum(
+        (pnts2-pnts1) * mesh.n[msk_f,:].T.unsqueeze(-1),
+    dim=0)
+
+    pnts_intersect = (pnts1 - pnts2) * ratio_intersect + pnts2
+    msk_in = (ratio_intersect >= 0) & (ratio_intersect <= 1)
+
+    dir1 = mesh.s[:,0,msk_f] - mesh.s[:,1,msk_f]
+    dir2 = mesh.s[:,2,msk_f] - mesh.f[:,1,msk_f]
+
+    det_inv = (
+        dir1[0].unsqueeze(-1).unsqueeze(-1) * dir2[1].unsqueeze(-1).unsqueeze(-1) -
+        dir1[1].unsqueeze(-1).unsqueeze(-1) * dir2[0].unsqueeze(-1).unsqueeze(-1)
+    )
+
+    r1 = (
+        dir2[1].unsqueeze(-1).unsqueeze(-1) * (pnts_intersect[0] - mesh.s[0, 1, msk_f].unsqueeze(-1).unsqueeze(-1)) -
+        dir2[0].unsqueeze(-1).unsqueeze(-1) * (pnts_intersect[1] - mesh.s[1, 1, msk_f].unsqueeze(-1).unsqueeze(-1))
+    ) / det_inv
+
+    r2 = (
+        dir1[0].unsqueeze(-1).unsqueeze(-1) * (pnts_intersect[1] - mesh.s[1, 1, msk_f].unsqueeze(-1).unsqueeze(-1)) -
+        dir1[1].unsqueeze(-1).unsqueeze(-1) * (pnts_intersect[0] - mesh.s[0, 1, msk_f].unsqueeze(-1).unsqueeze(-1))
+    ) / det_inv
+
+    msk_in = torch.any(msk_in & (r1 > 0) & (r2 > 0) & (r1+r2 < 1), dim=0)
+    return msk_in
+
+def line_cross_box(pnts1, pnts2, box_blob):
+
+    # AABB Algorithm
+    x_min, y_min, z_min = box_blob[0,:]
+    x_max, y_max, z_max = box_blob[6,:]
+
+    t_xmin = (x_min - pnts1[:,0]) / (pnts2[:,0] - pnts1[:,0])
+    t_xmax = (x_max - pnts1[:,0]) / (pnts2[:,0] - pnts1[:,0])
+    t_ymin = (y_min - pnts1[:,1]) / (pnts2[:,1] - pnts1[:,1])
+    t_ymax = (y_max - pnts1[:,1]) / (pnts2[:,1] - pnts1[:,1])
+    t_zmin = (z_min - pnts1[:,2]) / (pnts2[:,2] - pnts1[:,2])
+    t_zmax = (z_max - pnts1[:,2]) / (pnts2[:,2] - pnts1[:,2])
+
+    tmin = torch.max(
+        torch.stack(
+            [torch.min(t_xmin, t_xmax),torch.min(t_ymin, t_ymax), torch.min(t_zmin, t_zmax)], dim=0
+        ), dim=0
+    )
+
+    tmax = torch.min(
+        torch.stack(
+            [torch.max(t_xmin, t_xmax), torch.max(t_ymin, t_ymax), torch.max(t_zmin, t_zmax)], dim=0
+        ), dim=0
+    )
+
+    msk_line = (tmax >= tmin) & (tmax >= 0) & (tmin <= 1)
+
+    return msk_line
+
+def pnts_in_cube(pnts, box_blob):
+
+    x_min, y_min, z_min = box_blob[0, :]
+    x_max, y_max, z_max = box_blob[6, :]
+
+    msk_pnt = (
+            (pnts[0] > x_min) & (pnts[0] < x_max) &
+            (pnts[1] > y_min) & (pnts[1] < y_max) &
+            (pnts[2] > z_min) & (pnts[2] < z_max)
+    )
+
+    return msk_pnt
