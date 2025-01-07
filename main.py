@@ -13,7 +13,7 @@ else:
     device = torch.device("cpu")
     print("Using CPU")
 
-mesh = MESH("map_data/Manhattan.obj",
+mesh = MESH("Manhattan",
             device,
             rotation_dir = torch.tensor([0.8409, -0.5411, 0.0]))
 

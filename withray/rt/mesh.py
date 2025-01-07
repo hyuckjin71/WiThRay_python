@@ -2,36 +2,75 @@
 Classes and Methods for MESH.
 """
 from vedo import *
+import os
+import pickle
 import torch
 import torch.nn.functional as F
 
 class MESH:
-    def __init__(self, filename, device, rotation_dir = torch.tensor([1.0, 0.0, 0.0])):
-        self.mesh_file = Mesh(filename)
+    def __init__(self, file_name, device, rotation_dir = torch.tensor([1.0, 0.0, 0.0])):
+        dir_path = "map_data/"
+        file_path = os.path.join(dir_path, f"{file_name}.pkl")
 
-        self.v = torch.tensor(self.mesh_file.vertices)[:, [0,2,1]] * torch.tensor([-1,1,1])
-        self.v = self.v.to(dtype=torch.float32)
+        if os.path.exists(file_path):
+            with open(file_path, 'rb') as file:
+                loaded_obj = pickle.load(file)
+                self.__dict__.update(loaded_obj)
+                print(f"Loaded mesh from {file_path}")
 
-        rotation_dir = F.normalize(
-            torch.tensor([rotation_dir[0], rotation_dir[1], 0.0]), p=2, dim=0
-        )
-        rotation_mat = torch.cat([
-            rotation_dir.unsqueeze(0),
-            torch.tensor([-rotation_dir[1], rotation_dir[0], 0.0]).unsqueeze(0),
-            torch.tensor([0.0, 0.0, 1.0]).unsqueeze(0)
-        ], dim=0).to(dtype=torch.float32)
+                file_path = os.path.join(dir_path, f"{file_name}.obj")
+                self.mesh_file = Mesh(file_path)
+                self.v = self.v.to(device=device)
+                self.f = self.f.to(device=device)
+                self.n = self.n.to(device=device)
+                self.s = self.s.to(device=device)
+        else:
+            file_path = os.path.join(dir_path, f"{file_name}.obj")
+            self.mesh_file = Mesh(file_path)
+            file_path = os.path.join(dir_path, f"{file_name}.pkl")
 
-        self.v = self.v @ rotation_mat.T
-        self.v = self.v
-        self.f = torch.tensor(self.mesh_file.faces(), dtype=torch.long)
-        self.merge_vertices()
+            self.v = torch.tensor(self.mesh_file.vertices)[:, [0,2,1]] * torch.tensor([-1,1,1])
+            self.v = self.v.to(dtype=torch.float32)
 
-        self.v = self.v.to(device=device)
-        self.f = self.f.to(device=device)
-        self.s = self.v[self.f].permute(2,1,0).to(device=device)
-        self.n = self.mesh_normals().to(device=device)
+            rotation_dir = F.normalize(
+                torch.tensor([rotation_dir[0], rotation_dir[1], 0.0]), p=2, dim=0
+            )
+            rotation_mat = torch.cat([
+                rotation_dir.unsqueeze(0),
+                torch.tensor([-rotation_dir[1], rotation_dir[0], 0.0]).unsqueeze(0),
+                torch.tensor([0.0, 0.0, 1.0]).unsqueeze(0)
+            ], dim=0).to(dtype=torch.float32)
 
+            self.v = self.v @ rotation_mat.T
+            self.v = self.v
+            self.f = torch.tensor(self.mesh_file.faces(), dtype=torch.long)
+            self.merge_vertices()
 
+            self.v = self.v.to(device=device)
+            self.f = self.f.to(device=device)
+            self.s = self.v[self.f].permute(2,1,0).to(device=device)
+            self.n = self.mesh_normals().to(device=device)
+
+            with open(file_path, 'wb') as file:
+                pickle.dump(self.to_serializable_dict(), file)
+                print(f"Saved mesh to {file_path}")
+
+    def to_serializable_dict(self):
+        serializable_dict = {}
+        for key, value in self.__dict__.items():
+            try:
+                # 직렬화 가능한지 테스트
+                pickle.dumps(value)
+                # GPU 텐서를 CPU로 이동
+                if isinstance(value, torch.Tensor):
+                    serializable_dict[key] = value.cpu()
+                else:
+                    serializable_dict[key] = value
+            except TypeError:
+                # 직렬화 불가능한 객체는 제외
+                print(f"Excluding non-serializable object: {key} of type {type(value)}")
+                continue
+        return serializable_dict
 
     def mesh_normals(self):
 
@@ -76,14 +115,18 @@ class MESH:
                     col = (ii-1)*blck_size + col_unique
                     row = (ii-1)*blck_size + row[idc_unique]
 
-                    for iii in range(len(col)):
+                    len_decrease = len(col)
+                    for iii in list(range(len(col)))[::-1]:
                         self.f[self.f == col[iii]] = row[iii]
 
                     ncol = torch.tensor([idx for idx in range(start_idx, end_idx) if idx not in col])
                     for iii in range(len(ncol)):
-                        self.f[self.f == ncol[iii]] = start_idx + iii
+                        if torch.any(self.f == ncol[iii]):
+                            self.f[self.f == ncol[iii]] = start_idx + iii
+                        else:
+                            col = torch.cat([col, ncol[iii]])
 
-                    self.f[self.f > min(ii*blck_size, idx_v_end-len(col))-1] -= len(col)
+                    self.f[self.f > min(ii*blck_size, idx_v_end-len_decrease)-1] -= len_decrease
 
                     mask_to_keep = torch.ones(idx_v_end, dtype=bool, device = col.device)
                     mask_to_keep[col] = False
