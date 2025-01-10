@@ -130,9 +130,7 @@ def bvh_algorithm(msk_in, mesh, pnts1, pnts2, msk_box_prev, msk_prev, level, box
         i1, i2 = torch.where(msk_prev)
 
         msk_line = msk_prev.clone()
-        msk_line_clone = msk_line.clone()
-        msk_line_clone[msk_line] = line_cross_box(pnts1[:, i1], pnts2[:, i2], box_blob_)
-        msk_line = msk_line_clone
+        msk_line[msk_line.clone()] = line_cross_box(pnts1[:, i1], pnts2[:, i2], box_blob_)
 
         i1, i2 = torch.where(msk_line)
 
