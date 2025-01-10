@@ -1,9 +1,12 @@
 """
 Classes and Methods for RAYS.
 """
+import time, copy
 import torch
-from withray.rt import Tx, Rx, line_pnt_intersect
-from withray.rt.utils import sorted_inv_s
+from vedo import Point, Light, Plotter, show, sin, cos
+from withray import PI
+from withray.rt import Tx, Rx
+from withray.rt.utils import sorted_inv_s, line_pnt_intersect
 
 class RAYS:
     def __init__(self, bs, ris, ue, mesh, device):
@@ -32,31 +35,19 @@ class RAYS:
     @staticmethod
     def compute_rays(pnts_tx, pnts_rx, mesh):
 
-        msk_in = line_pnt_intersect(pnts_tx, mesh.v, mesh)
+        # p1 = Point([200*cos(-230/180*PI), 200*sin(-230/180*PI), 60], c='white')
+        # l1 = Light(p1, c='white')
+        #
+        # p2 = Point(pnts_tx[:, 0].to(device="cpu").numpy() + [0,0,1], c='white')
+        # l2 = Light(p2, c='white')
 
-        inv_s_tx = sorted_inv_s(mesh, pnts_tx)
-        num_f = inv_s_tx.shape[2]
-        inv_s_tx = inv_s_tx.permute(0,1,3,2).reshape(3,3,-1).permute(1,0,2).unsqueeze(-1)
-        pnts_tx = pnts_tx.unsqueeze(-1).unsqueeze(-1).permute(0,2,3,1).unsqueeze(-1)
-        pnts_v = mesh.v.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).permute(1,2,3,4,0).to(dtype=torch.float32, device=pnts_tx.device)
+        mesh_ = copy.deepcopy(mesh)
+        mesh_.mesh_to_device("cpu")
+        msk_v = ~line_pnt_intersect(pnts_tx.to(device="cpu"), mesh_.v.T, mesh_)
 
-        msk_in = torch.zeros(pnts_tx.shape[3], pnts_v.shape[4], dtype=torch.bool, device=pnts_tx.device)
+        idc_v = torch.nonzero(msk_v[0,:], as_tuple=True)[0]
+        msk_f = torch.any( torch.isin(mesh.f, idc_v), dim=1)
 
-        dir = pnts_v - pnts_tx
-        idx = 0
 
-        while idx < num_f and torch.sum(~msk_in) != 0:
-            blck_size = int(torch.ceil(2e7 / torch.sum(~msk_in)))
-            start_idx = idx + 1
-            end_idx = min(idx + blck_size, num_f)
-            idc = torch.arange(start_idx, end_idx+1, dtype=torch.long) - 1
-
-            k = torch.sum(inv_s_tx[:,:,idc] * dir[:,:,:,~msk_in], axis=0)
-            msk_in[~msk_in] = torch.any((torch.sum(k, axis=0) > 1) & torch.all(k > 0, axis=0), axis=0)
-            # print("{}, {}".format(torch.sum(msk_in).item(), torch.sum(~msk_in).item()))
-
-            idx = end_idx
-
-        return msk_in
 
 

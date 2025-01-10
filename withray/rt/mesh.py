@@ -12,6 +12,15 @@ class MESH:
         dir_path = "map_data/"
         file_path = os.path.join(dir_path, f"{file_name}.pkl")
 
+        rotation_dir = F.normalize(
+            torch.tensor([rotation_dir[0], rotation_dir[1], 0.0]), p=2, dim=0
+        )
+        rotation_mat = torch.cat([
+            rotation_dir.unsqueeze(0),
+            torch.tensor([-rotation_dir[1], rotation_dir[0], 0.0]).unsqueeze(0),
+            torch.tensor([0.0, 0.0, 1.0]).unsqueeze(0)
+        ], dim=0).to(dtype=torch.float32)
+
         if os.path.exists(file_path):
             with open(file_path, 'rb') as file:
                 loaded_obj = pickle.load(file)
@@ -20,40 +29,35 @@ class MESH:
 
                 file_path = os.path.join(dir_path, f"{file_name}.obj")
                 self.mesh_file = Mesh(file_path)
-                self.v = self.v.to(device=device)
-                self.f = self.f.to(device=device)
-                self.n = self.n.to(device=device)
-                self.s = self.s.to(device=device)
         else:
+            file_path = os.path.join(dir_path, f"{file_name}.pkl")
+
             file_path = os.path.join(dir_path, f"{file_name}.obj")
             self.mesh_file = Mesh(file_path)
-            file_path = os.path.join(dir_path, f"{file_name}.pkl")
 
             self.v = torch.tensor(self.mesh_file.vertices)[:, [0,2,1]] * torch.tensor([-1,1,1])
             self.v = self.v.to(dtype=torch.float32)
-
-            rotation_dir = F.normalize(
-                torch.tensor([rotation_dir[0], rotation_dir[1], 0.0]), p=2, dim=0
-            )
-            rotation_mat = torch.cat([
-                rotation_dir.unsqueeze(0),
-                torch.tensor([-rotation_dir[1], rotation_dir[0], 0.0]).unsqueeze(0),
-                torch.tensor([0.0, 0.0, 1.0]).unsqueeze(0)
-            ], dim=0).to(dtype=torch.float32)
 
             self.v = self.v @ rotation_mat.T
             self.v = self.v
             self.f = torch.tensor(self.mesh_file.faces(), dtype=torch.long)
             self.merge_vertices()
 
-            self.v = self.v.to(device=device)
-            self.f = self.f.to(device=device)
-            self.s = self.v[self.f].permute(2,1,0).to(device=device)
-            self.n = self.mesh_normals().to(device=device)
+            self.s = self.v[self.f].permute(2,1,0)
+            self.n = self.mesh_normals()
 
             with open(file_path, 'wb') as file:
                 pickle.dump(self.to_serializable_dict(), file)
                 print(f"Saved mesh to {file_path}")
+
+        self.mesh_file.vertices = self.mesh_file.vertices[:, [0,2,1]]
+        self.mesh_file.vertices[:,0] *= -1
+        self.mesh_file.vertices = self.mesh_file.vertices @ rotation_mat.T.numpy()
+
+        self.mesh_to_device(device=device)
+
+        file_path = os.path.join(dir_path, f"{file_name}.png")
+        self.mesh_file.texture(file_path, scale=1)
 
     def to_serializable_dict(self):
         serializable_dict = {}
@@ -71,6 +75,13 @@ class MESH:
                 print(f"Excluding non-serializable object: {key} of type {type(value)}")
                 continue
         return serializable_dict
+
+    def mesh_to_device(self, device):
+
+        self.v = self.v.to(device=device)
+        self.f = self.f.to(device=device)
+        self.s = self.s.to(device=device)
+        self.n = self.n.to(device=device)
 
     def mesh_normals(self):
 
