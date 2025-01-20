@@ -50,6 +50,20 @@ class MESH:
                 pickle.dump(self.to_serializable_dict(), file)
                 print(f"Saved mesh to {file_path}")
 
+        vec1 = self.s[:,1,:] - self.s[:,0,:]
+        vec2 = self.s[:,2,:] - self.s[:,1,:]
+        vec3 = self.s[:,0,:] - self.s[:,2,:]
+
+        self.fa = torch.linalg.norm(                    # (1 x num_f) Surface Area
+            torch.cross(vec1, vec2, dim=0), dim=0
+        )
+
+        self.fl = torch.stack(
+            [torch.linalg.norm(vec1, dim=0),
+             torch.linalg.norm(vec2, dim=0),
+             torch.linalg.norm(vec3, dim=0)],
+        )
+
         self.mesh_file.vertices = self.mesh_file.vertices[:, [0,2,1]]
         self.mesh_file.vertices[:,0] *= -1
         self.mesh_file.vertices = self.mesh_file.vertices @ rotation_mat.T.numpy()

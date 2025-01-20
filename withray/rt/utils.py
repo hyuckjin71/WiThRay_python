@@ -139,11 +139,12 @@ def bvh_algorithm(msk_in, mesh, pnts1, pnts2, msk_box_prev, msk_prev, level, box
         )
 
         if torch.sum(msk_f) * torch.sum(msk_line) < 1e7:
-            msk_in[msk_line] = msk_in[msk_line] | torch.squeeze(
-                pnts_in_surfaces(mesh, msk_f,
-                                 pnts1[:,i1].view(3,1,1,-1),
-                                 pnts2[:,i2].view(3,1,1,-1))
-            )
+            if torch.any(msk_line):
+                msk_in[msk_line] = msk_in[msk_line] | torch.squeeze(
+                    pnts_in_surfaces(mesh, msk_f,
+                                     pnts1[:,i1].view(3,1,1,-1),
+                                     pnts2[:,i2].view(3,1,1,-1))
+                )
         else:
             msk_in = bvh_algorithm(msk_in, mesh, pnts1, pnts2, msk_box_, msk_line, level+1, box_blob)
 
@@ -179,6 +180,86 @@ def pnts_in_surfaces(mesh, msk_f, pnts1, pnts2):
 
     msk_in = torch.any(msk_in & (r1 > 0) & (r2 > 0) & (r1+r2 < 1), dim=0)
     return msk_in
+
+def pnts_through_surfaces(mesh, idc_f, pnts1, pnts2):
+
+    pnts1 = pnts1.unsqueeze(-1).to(device="mps")                     # (3 x num_pnts1 x 1)
+    pnts2 = pnts2.unsqueeze(-1).permute(0,2,1).to(device="mps")      # (3 x 1 x num_pnts2)
+
+    msk_in = torch.zeros(idc_f.shape[0], pnts2.shape[2], dtype=torch.bool)
+
+    blck_size = torch.ceil(torch.tensor(2e7)/pnts1.shape[1]).to(dtype=torch.int)
+    i = 0
+    end_idx = 0
+    while end_idx < pnts2.shape[2]:
+
+        start_idx = i * blck_size
+        end_idx = min((i+1)*blck_size, pnts2.shape[2])
+        i += 1
+
+        pnts2_blck = pnts2[:,:,torch.arange(start_idx,end_idx)]
+        ratio_intersect = torch.sum(
+            (pnts2_blck - mesh.s[:,0, idc_f].view(3, -1, 1)) * mesh.n[:, idc_f].view(3, -1, 1),
+        dim=0) / torch.sum(
+            (pnts2_blck - pnts1) * mesh.n[:, idc_f].view(3, -1, 1)
+        )
+
+        pnts_intersect = (pnts1 - pnts2_blck) * ratio_intersect.unsqueeze(0) + pnts2_blck
+        msk_in_ = (ratio_intersect >= 0) & (ratio_intersect <= 1)
+
+        dir1 = mesh.s[:,0, idc_f] - mesh.s[:, 1, idc_f]
+        dir2 = mesh.s[:,2, idc_f] - mesh.s[:, 1, idc_f]
+
+        det_inv = dir1[0] * dir2[1] - dir1[1] * dir2[0]
+
+        r1 = (
+                 dir2[1].unsqueeze(-1) * (pnts_intersect[0] - mesh.s[0, 1, idc_f].unsqueeze(-1)) -
+                 dir2[0].unsqueeze(-1) * (pnts_intersect[1] - mesh.s[1, 1, idc_f].unsqueeze(-1))
+        ) / det_inv.unsqueeze(-1)
+
+        r2 = (
+                 dir1[0].unsqueeze(-1) * (pnts_intersect[1] - mesh.s[1, 1, idc_f].unsqueeze(-1)) -
+                 dir1[1].unsqueeze(-1) * (pnts_intersect[0] - mesh.s[0, 1, idc_f].unsqueeze(-1))
+        ) / det_inv.unsqueeze(-1)
+
+        msk_in_ = msk_in_ & (r1 > 0) & (r2 > 0) & (r1 + r2 < 1)
+        msk_in[:,torch.arange(start_idx,end_idx)] = msk_in_.to(device=msk_in.device)
+        print(f"\r[{end_idx}/{pnts2.shape[2]}]")
+
+    return msk_in
+
+def pnts_through_edge(mesh, idc_d, pnts_edge, pnts1, pnts2):
+
+    pnts1 = pnts1.to(device="mps").unsqueeze(-1)                # (3 x num_pnts1 x 1)
+    pnts2 = pnts2.unsqueeze(-1).permute(0,2,1).to(device="mps") # (3 x 1 x num_pnts2)
+    pnts_on = pnts_edge[:,0,:].unsqueeze(-1).to(device="mps")   # (3 x num_pnts1 x 1)
+
+    dir_edge = pnts_edge[:,1,:] - pnts_edge[:,0,:]
+    dir_edge = dir_edge / torch.linalg.norm(dir_edge, dim=0, keepdim=True)
+    dir_edge = dir_edge.unsqueeze(-1).to(device="mps")          # (3 x num_pnts1 x 1) : num_edge is equal to num_pnts1
+    dir1 = pnts1 - pnts_on
+    d1 = torch.linalg.norm(dir1 - torch.sum(dir_edge * dir1, dim=0, keepdim=True) * dir_edge, dim=0, keepdim=True)
+
+    msk_on = torch.zeros(pnts1.shape[1], pnts2.shape[2], dtype=torch.bool)
+    blck_size = torch.ceil(torch.tensor(2e7)/pnts1.shape[1]).to(dtype=torch.int)
+    i = 0
+    end_idx = 0
+    while end_idx < pnts2.shape[2]:
+        start_idx = i * blck_size
+        end_idx = min((i+1)*blck_size, pnts2.shape[2])
+        i += 1
+
+        dir2 = pnts2[:,:,torch.arange(start_idx,end_idx)] - pnts_on
+        d2 = torch.linalg.norm(dir2 - torch.sum(dir_edge * dir2, dim=0, keepdim=True) * dir_edge, dim=0, keepdim=True)
+
+        k = d2 / (d1+d2) * torch.sum(dir_edge * dir1, dim=0, keepdim=True) + d1 / (d1+d2) * torch.sum(dir_edge * dir2, dim=0, keepdim=True)
+
+        msk_on_ = (k > 0) & (k < 1) & (torch.sum(
+            (pnts1 - pnts_on) * (pnts2[:,:,torch.arange(start_idx,end_idx)] - pnts_on), dim=0, keepdim=True
+        ) < 0) & (torch.sum((pnts2[:,:,torch.arange(start_idx,end_idx)] - pnts_on) * mesh.n[:,idc_d[0,:]].unsqueeze(-1), dim=0, keepdim=True) < 0)
+        msk_on[:, torch.arange(start_idx, end_idx)] = msk_on_.to(device="cpu")
+        print(f"\r[{end_idx}/{pnts2.shape[2]}]")
+    return msk_on
 
 def line_cross_box(pnts1, pnts2, box_blob):
 
