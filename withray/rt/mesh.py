@@ -96,6 +96,8 @@ class MESH:
         self.f = self.f.to(device=device)
         self.s = self.s.to(device=device)
         self.n = self.n.to(device=device)
+        self.fa = self.fa.to(device=device)
+        self.fl = self.fl.to(device=device)
 
     def mesh_normals(self):
 
