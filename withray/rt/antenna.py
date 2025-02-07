@@ -4,9 +4,9 @@ Classes and Methods for Antennas.
 import torch
 
 class Antenna:
-    def __init__(self, num_hor, num_ver, intv_hor="half", intv_ver="half", nmr = None, polarization = None, pattern = "dipole"):
-        if pattern == "dipole":
-            self.pattern = "dipole"
+    def __init__(self, num_hor, num_ver, intv_hor="half", intv_ver="half", nmr = None, polarization = None, pattern = "cross dipole"):
+        if pattern == "cross dipole":
+            self.pattern = "cross dipole"
         else:
             self.pattern = pattern
 

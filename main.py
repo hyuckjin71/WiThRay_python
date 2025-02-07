@@ -18,6 +18,7 @@ def print_mouse_coordinates(evt):
 device = torch.device("cpu")
 print("Using CPU")
 
+# mesh = MESH("HealthScienceCampusUnivUtah_1", device)
 mesh = MESH("Manhattan",
             device,
             rotation_dir = torch.tensor([0.8409, -0.5411, 0.0]))
@@ -31,12 +32,18 @@ mesh = MESH("Manhattan",
 #
 # plotter = Plotter(title="Mouse Over Coordinates Example", axes=1)
 # plotter.add_callback("mouse move", print_mouse_coordinates)
-# plotter.show(mesh.mesh_file, p1, l1).interactive()]
+# # plotter = Plotter()
+# plotter.show(mesh.mesh_file, p1, l1).interactive()
 
 nmr = [Numerology("up","FR1.n41")]
+
+
 ant_bs  = [Antenna(1,2, nmr = nmr[0]),]
-ant_ris = [Antenna(8,8, intv_hor = 0.1, intv_ver = 0.1, nmr = nmr[0]),]
-ant_ue  = [Antenna(1,1, nmr = nmr[0]),]
+
+ant_ris = [Antenna(2,2, intv_hor = 0.1, intv_ver = 0.1, nmr = nmr[0]),]
+
+ant_ue_tx  = [Antenna(1,1, nmr = nmr[0]),]
+ant_ue_rx = [Antenna(1,1, pattern="patch", nmr = nmr[0]),]
 
 pnts_bs = [[25.4229, -167.19, -1],]
 dirs_bs = [[-1, 0, 0],]
@@ -44,59 +51,119 @@ dirs_bs = [[-1, 0, 0],]
 pnts_ris = [[1.3941, -153, 3],]
 dirs_ris  = [[0, 1, 0],]
 
-pnts_ue = [[-61.2, -164.2, -13],]
-# pnts_ue = [[-23.0, -203.0, -20],]
+# pnts_ue = [[ -48.10153583, -127.81710658,  -17.45029463],]
+pnts_ue = [[  -8.80681734, -205.41460832,  -21.41402496]]
+# pnts_ue = [[-10.25, -203.7, -20],]
+# pnts_ue = [[ -67.05425681, -162.63761299,  -18],]
 # pnts_ue = [[-70.0, -190.0, -20],]
 dirs_ue = [[0,0,1],]
+'''
 
-bs = [BS(f"bs{i}", pnts, dirs_bs[i], ant_tx = ant_bs[i]) for i,pnts in enumerate(pnts_bs)]
-bs[0].nmr = nmr[0]
+ant_bs  = [Antenna(4,2, nmr = nmr[0]),  # ACC
+           Antenna(4,2, nmr = nmr[0]),  # USTAR
+           Antenna(4,2, nmr = nmr[0]),  # MEB
+           Antenna(4,2, nmr = nmr[0])]  # EBC
 
-ris = [RIS(f"ris{i}", pnts, dirs_ris[i], ant_tx = ant_ris[i]) for i,pnts in enumerate(pnts_ris)]
-ris[0].nmr = nmr[0]
+ant_ris = []
 
-ue = [UE(f"ue{i}", pnts, dirs_ue[i], ant_rx = ant_ue[i]) for i,pnts in enumerate(pnts_ue)]
-ue[0].nmr = nmr[0]
+ant_ue  = [Antenna(1,1, nmr = nmr[0]),
+           Antenna(1,1, nmr = nmr[0]),
+           Antenna(1,1, nmr = nmr[0]),
+           Antenna(1,1, nmr = nmr[0]),
+           Antenna(1,1, nmr = nmr[0]),
+           Antenna(1,1, nmr = nmr[0]),
+           Antenna(1,1, nmr = nmr[0]),
+           Antenna(1,1, nmr = nmr[0]),
+           Antenna(1,1, nmr = nmr[0]),
+           Antenna(1,1, nmr = nmr[0]),
+           Antenna(1,1, nmr = nmr[0]),
+           Antenna(1,1, nmr = nmr[0]),
+           Antenna(1,1, nmr = nmr[0]),
+           Antenna(1,1, nmr = nmr[0]),
+           Antenna(1,1, nmr = nmr[0]),
+           Antenna(1,1, nmr = nmr[0]),]
+           
+pnts_bs = [[174.04, 196.26, 49.65],    # ACC
+           [-177.35, -23.26, -6.29],    # USTAR
+           [-523.64, -23.96, -32.41],    # MEB
+           [97.11, -153.15, -4.49]]    # EBC
+
+dirs_bs = [[cos(PI/4), -sin(PI/4), 0],
+           [-cos(PI/4), -sin(PI/4), 0],
+           [-1, 0, 0],
+           [cos(PI/4), sin(PI/4), 0],]
+
+pnts_ris = []
+dirs_ris = []
+
+pnts_ue = [[-525.12, -107.79, -45.00],
+           [-312.19, -447.57, -42.60],
+           [-299.84, -155.23, -34.68],
+           [-173.55, -0.41, -24.32],
+           [-196.35, -108.00, -28.15],
+           [-125.23, -194.67, -28.45],
+           [9.84, -184.83, -22.76],
+           [91.45, -145.17, -16.60],
+           [-101.16, -54.92, -21.74],
+           [18.56, 9.26, -12.92],
+           [66.51, 103.75, -5.53],
+           [123.31, 124.94, -4.25],
+           [273.02, -149.54, -6.85],
+           [-133.72, 420.07, -3.25],
+           [-322.79, 266.80, -26.73],
+           [-398.68, 49.90, -33.67],]
+
+dirs_ue = [[0,0,1],
+           [0,0,1],
+           [0,0,1],
+           [0,0,1],
+           [0,0,1],
+           [0,0,1],
+           [0,0,1],
+           [0,0,1],
+           [0,0,1],
+           [0,0,1],
+           [0,0,1],
+           [0,0,1],
+           [0,0,1],
+           [0,0,1],
+           [0,0,1],
+           [0,0,1],]
+'''
+# plt = Plotter()
+#
+# p1 = Point([0 * cos(-230 / 180 * PI), 0 * sin(-230 / 180 * PI), 1000], c='white')
+# l1 = Light(p1, c='white')
+#
+# plt += Point(pnts_bs[0]).color("red",1)
+# plt += Point(pnts_bs[1]).color("red",1)
+# plt += Point(pnts_bs[2]).color("red",1)
+# plt += Point(pnts_bs[3]).color("red",1)
+#
+# plt += Point(pnts_ue[0]).color("blue",1)
+# plt += Point(pnts_ue[1]).color("blue",1)
+# plt += Point(pnts_ue[2]).color("blue",1)
+# plt += Point(pnts_ue[3]).color("blue",1)
+# plt += Point(pnts_ue[4]).color("blue",1)
+# plt += Point(pnts_ue[5]).color("blue",1)
+# plt += Point(pnts_ue[6]).color("blue",1)
+# plt += Point(pnts_ue[7]).color("blue",1)
+# plt += Point(pnts_ue[8]).color("blue",1)
+# plt += Point(pnts_ue[9]).color("blue",1)
+# plt += Point(pnts_ue[10]).color("blue",1)
+# plt += Point(pnts_ue[11]).color("blue",1)
+# plt += Point(pnts_ue[12]).color("blue",1)
+# plt += Point(pnts_ue[13]).color("blue",1)
+# plt += Point(pnts_ue[14]).color("blue",1)
+# plt += Point(pnts_ue[15]).color("blue",1)
+#
+# plt.show(mesh.mesh_file, p1, l1).interactive()
+
+bs = [BS(f"bs{i}", pnts, dirs_bs[i], ant_tx = ant_bs[i], nmr = nmr[0]) for i,pnts in enumerate(pnts_bs)]
+
+ris = [RIS(f"ris{i}", pnts, dirs_ris[i], ant_tx = ant_ris[i], nmr = nmr[0]) for i,pnts in enumerate(pnts_ris)]
+
+ue = [UE(f"ue{i}", pnts, dirs_ue[i], ant_tx = ant_ue_tx[i], ant_rx = ant_ue_rx[i], nmr = nmr[0]) for i,pnts in enumerate(pnts_ue)]
 
 rays = RAYS(bs, ris, ue, mesh, device)
-rays.collect_rays()
-
-# =====================================================================================================================
-
-msk_f = torch.any(msk_v[start_idx:end_idx, self.mesh.f], dim=2)
-i1, i2 = torch.where(msk_f)
-i1 += start_idx
-
-mesh_v = mesh_.s[:, 0, i2].unsqueeze(1)
-mesh_n = mesh_.n[:, i2].unsqueeze(1)
-
-# (Reflection from diffraction) ===============================================================================
-
-msk_difrct = torch.any(node_prev[:, 0:2, -1, i1] != 0, dim=[0, 1])
-msk_reflct = ~msk_difrct
-
-'''
-Check whether the next vertices form a valid reflective surface
-based on whether the previous node (node_prev) was a reflecting or diffracting point.
-
-The next reflective surface must face the previous node, meaning the directional vector
-should align with the surface's normal vector.
-'''
-
-msk_difrct[msk_difrct.clone()] = torch.any(
-    torch.sum(mesh_n[:, :, msk_difrct] * (node_prev[:, 0:2, -1, i1][:, :, msk_difrct] - mesh_v[:, :, msk_difrct]),
-              dim=0) > 0, dim=0
-) & ~torch.any(torch.all(mesh_v[:, :, msk_difrct] == node_prev[:, 0:2, -1, i1][:, :, msk_difrct], dim=0), dim=0)
-
-dist = torch.linalg.norm(mesh_v[:, :, msk_difrct] - node_prev[:, 0:2, -1, i1][:, :, msk_difrct], dim=0)
-dist = torch.where(dist < 1, torch.tensor(1.0), dist)
-alignment = torch.min(
-    torch.abs(
-        torch.sum(mesh_n[:, :, msk_difrct] * (mesh_v[:, :, msk_difrct] - node_prev[:, 0:2, -1, i1][:, :, msk_difrct]),
-                  dim=0)
-        ) / torch.linalg.norm(mesh_v[:, :, msk_difrct] - node_prev[:, 0:2, -1, i1][:, :, msk_difrct], dim=0),
-    dim=0, keepdim=True)
-
-node_priority_ = mesh_.fa[i2][msk_difrct].unsqueeze(0) * alignment[0] / torch.gather(dist, dim=0, index=alignment[1])
-node_priority_ = node_priority_.squeeze() * node_priority_prev[i1][msk_difrct]
-node_priority = torch.cat((node_priority, node_priority_), dim=0)
+rays.collect_rays(3, 1e3)

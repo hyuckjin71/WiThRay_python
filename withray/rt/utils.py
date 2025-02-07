@@ -3,6 +3,8 @@ Ray tracer utilities
 """
 
 import torch
+import time
+from vedo import *
 
 # def inverse_mat(mat_a):
 #     """
@@ -203,7 +205,7 @@ def pnts_in_surfaces(mesh, msk_f, pnts1, pnts2, idc_f_except = None):
 
     return msk_in
 
-def pnts_through_surfaces(mesh, idc_f, pnts1, pnts2):
+def pnts_through_surfaces(mesh, idc_f, pnts1, pnts2, start_v=0):
 
     if pnts1.dim() == 2:
         pnts1_ = pnts1.unsqueeze(-1).to(device="mps")                     # (3 x num_pnts1 x 1)
@@ -211,13 +213,15 @@ def pnts_through_surfaces(mesh, idc_f, pnts1, pnts2):
         pnts1_ = pnts1.to(device="mps")
     pnts2 = pnts2.unsqueeze(-1).permute(0,2,1).to(device="mps")      # (3 x 1 x num_pnts2)
 
-    msk_in = torch.zeros(idc_f.shape[0], pnts2.shape[2], dtype=torch.bool)
+    msk_in = torch.zeros(idc_f.shape[0], mesh.v.shape[0], dtype=torch.bool)
+    # msk_in_ = torch.ones(idc_f.shape[0], mesh.v.shape[0], dtype=torch.bool)
+    # mesh_f = mesh.f.to(device="cpu")
 
     blck_size = torch.ceil(torch.tensor(1e6)/pnts1.shape[1]).to(dtype=torch.int)
     i = 0
     end_idx = 0
+    start_time = time.time()
     while end_idx < pnts2.shape[2]:
-
         start_idx = i * blck_size
         end_idx = min((i+1)*blck_size, pnts2.shape[2])
         i += 1
@@ -236,42 +240,65 @@ def pnts_through_surfaces(mesh, idc_f, pnts1, pnts2):
 
         pnts_intersect = (pnts1_blck - pnts2_blck) * ratio_intersect.unsqueeze(0) + pnts2_blck
 
-        msk_v = torch.zeros(mesh.v.shape[0], dtype=torch.bool, device="mps")
-        msk_v[start_idx:end_idx] = True
-        msk_f = torch.all(msk_v[mesh.f], dim=1)
-
-        tri1 = pnts_intersect[:,:,mesh.f[msk_f,:]-start_idx].permute(0,3,1,2)
-        tri2 = mesh.s[:,:,idc_f]
-        dir1 = torch.cat(
-            (tri1[:,0,:,:].unsqueeze(1) - tri1[:,1,:,:].unsqueeze(1),
-             tri1[:,1,:,:].unsqueeze(1) - tri1[:,2,:,:].unsqueeze(1),
-             tri1[:,2,:,:].unsqueeze(1) - tri1[:,0,:,:].unsqueeze(1)), dim=1
-        )
-        dir1 = dir1 / torch.linalg.norm(dir1, dim=0, keepdim=True)
-        dir2 = torch.cat(
-            (tri2[:,0,:].unsqueeze(1) - tri2[:,1,:].unsqueeze(1),
-             tri2[:,1,:].unsqueeze(1) - tri2[:,2,:].unsqueeze(1),
-             tri2[:,2,:].unsqueeze(1) - tri2[:,0,:].unsqueeze(1)), dim=1
-        )
-        dir2 = dir2 / torch.linalg.norm(dir2, dim=0, keepdim=True)
-
-        vec_p = tri1.unsqueeze(1) - tri2.unsqueeze(2).unsqueeze(-1)
-        vec_p = vec_p.unsqueeze(1)
-
-        null1 = torch.eye(3).view(3,3,1,1,1).repeat(1,1,3,tri1.shape[2],tri1.shape[3]).to(device="mps") - (
-            dir1.unsqueeze(0) * dir1.unsqueeze(1)
-        )
-        null2 = torch.eye(3).view(3,3,1,1).repeat(1,1,3,tri2.shape[2]).to(device="mps") - (
-            dir2.unsqueeze(0) * dir2.unsqueeze(1)
-        )
-        null1 = null1.unsqueeze(2).unsqueeze(4)
-        null2 = null2.unsqueeze(0).unsqueeze(3).unsqueeze(-1)
-        null_ = torch.sum( null1 * null2, dim=1)
-
-        msk_cross = torch.linalg.norm(
-            torch.sum( vec_p * null_, dim=0), dim= 0
-        )
-
+        # msk_v = torch.zeros(mesh.v.shape[0], dtype=torch.bool, device="mps")
+        # msk_v[start_v+torch.arange(start_idx,end_idx)] = True
+        # msk_f = torch.all(msk_v[mesh.f], dim=1)
+        #
+        # tri1 = pnts_intersect[:,:,mesh.f[msk_f,:]-start_idx].permute(0,3,1,2).unsqueeze(2)
+        # tri2 = mesh.s[:,:,idc_f].unsqueeze(1).unsqueeze(-1)
+        # dir1 = torch.cat(
+        #     (tri1[:,1:2,:,:] - tri1[:,0:1,:,:],
+        #      tri1[:,2:3,:,:] - tri1[:,1:2,:,:],
+        #      tri1[:,0:1,:,:] - tri1[:,2:3,:,:]), dim=1
+        # )
+        # dir2 = torch.cat(
+        #     (tri2[:,:,1:2,:] - tri2[:,:,0:1,:],
+        #      tri2[:,:,2:3,:] - tri2[:,:,1:2,:],
+        #      tri2[:,:,0:1,:] - tri2[:,:,2:3,:]), dim=2
+        # )
+        #
+        # det_inv = dir1[0] * dir2[1] - dir1[1] * dir2[0]
+        #
+        # vec_p = tri1 - tri2
+        # # vec_p1 = torch.sum(dir1 * vec_p, dim=0)
+        # # vec_p2 = torch.sum(dir2 * vec_p, dim=0)
+        # #
+        # # d11 = torch.sum(dir1 * dir1, dim=0)
+        # # d12 = torch.sum(dir1 * dir2, dim=0)
+        # # d21 = d12
+        # # d22 = torch.sum(dir2 * dir2, dim=0)
+        # #
+        # # det_inv = d11 * d22 - d12 * d21
+        # #
+        # # k0 = -(d22 * vec_p1 - d21 * vec_p2) / det_inv
+        # # k1 =  (d11 * vec_p2 - d12 * vec_p1) / det_inv
+        #
+        # k0 = -(dir2[1] * vec_p[0] - dir2[0] * vec_p[1]) / det_inv
+        # k1 = (dir1[0] * vec_p[1] - dir1[1] * vec_p[0]) / det_inv
+        #
+        # k0 = k0.to(device="cpu")
+        # k1 = k1.to(device="cpu")
+        # msk_cross = (torch.sum(
+        #     ((k0 > 0) & (k0 <  1)) & ((k1 > 0) & (k1 < 1)), dim=[0,1]
+        # ) > 1) | (
+        #     (torch.sum( torch.any( (k0<0) & (k1>0) & (k1<1), dim=0), dim=0) == 3) &
+        #     (torch.sum( torch.any( (k0>1) & (k1>0) & (k1<1), dim=0), dim=0) == 3) &
+        #     (torch.sum( ((k0<0) | (k0>1)) & (k1>0) & (k1<1), dim=[0,1]) == 6)
+        # ) | (
+        #     (torch.sum( torch.any( (k1<0) & (k0>0) & (k0<1), dim=1), dim=0) == 3) &
+        #     (torch.sum( torch.any( (k1>1) & (k0>0) ^ (k0<1), dim=1), dim=0) == 3) &
+        #     (torch.sum( ((k0<0) | (k0>1)) & (k0>0) & (k0<1), dim=[0,1]) == 6)
+        # )
+        #
+        # msk_f = msk_f.to(device="cpu")
+        # msk_in[:,mesh_f[msk_f,0]] = msk_in[:,mesh_f[msk_f,0]] | msk_cross
+        # msk_in[:,mesh_f[msk_f,1]] = msk_in[:,mesh_f[msk_f,1]] | msk_cross
+        # msk_in[:,mesh_f[msk_f,2]] = msk_in[:,mesh_f[msk_f,2]] | msk_cross
+        #
+        # msk_in_[:,start_v+torch.arange(start_idx,end_idx)] = (
+        #         (ratio_intersect >= 0).to(device="cpu") &
+        #         (ratio_intersect <= 1).to(device="cpu")
+        # )
 
         msk_in_ = (ratio_intersect >= 0) & (ratio_intersect <= 1)
 
@@ -379,12 +406,12 @@ def pnts_through_edge(level, edge_n, pnts_edge, pnts1, pnts2):
         )
 
         k = torch.zeros(level, pnts1_blck.shape[2], num_pnts2, device="mps")
-        msk_on_ = torch.ones(pnts1_blck.shape[2], num_pnts2, dtype=torch.bool, device="mps")
+        msk_on_ = torch.ones(pnts1_blck.shape[2], num_pnts2, dtype=torch.bool)
 
         for ii in range(level):
             dir_out_orthogonal = torch.cross( (pnts_path[:,ii+2,:,:] - pnts_path[:,ii+1,:,:]).to(device="cpu"),
                                               dir_edge_out[:,ii,start_idx:end_idx].unsqueeze(-1).to(device="cpu"), dim=0 ).to(device="mps")
-            msk_on_[:] = msk_on_.unsqueeze(0) & (
+            msk_on_[:] = msk_on_.unsqueeze(0) & ((
                 torch.sum( (pnts_path[:,ii+2,:,:] - pnts_path[:,ii+1,:,:]) * (pnts_path[:,ii,:,:] - pnts_path[:,ii+1,:,:]), dim=0, keepdim=True) < 0
             ) & (
                 torch.sum( (pnts_path[:,ii+2,:,:] - pnts_path[:,ii+1,:,:]) * edge_n[:,ii,start_idx:end_idx].unsqueeze(-1), dim=0, keepdim=True) > 0
@@ -392,7 +419,7 @@ def pnts_through_edge(level, edge_n, pnts_edge, pnts1, pnts2):
                 torch.sum( (pnts_path[:,ii+2,:,:] - pnts_path[:,ii+1,:,:]) * dir_edge_out[:,ii,start_idx:end_idx].unsqueeze(-1), dim=0, keepdim=True) < 0
             ) & (
                 torch.sum( (pnts_path[:,ii,:,:] - pnts_path[:,ii+1,:,:]) * dir_out_orthogonal, dim=0, keepdim=True) > 0
-            )
+            )).to(device="cpu")
 
         i1, i2 = torch.where(msk_on_)
 
@@ -411,11 +438,10 @@ def pnts_through_edge(level, edge_n, pnts_edge, pnts1, pnts2):
                 k[iii,i1,i2] = d2 / (d1+d2) * torch.sum(dir_edge_blck[:,iii,i1,0] * dir1, dim=0, keepdim=True) + d1 / (d1+d2) * torch.sum(dir_edge_blck[:,iii,i1,0] * dir2, dim=0, keepdim=True)
                 pnts_path[:,iii+1,i1,i2] = pnts_on_edge_blck[:,iii,i1,0] + k[iii,i1,i2] * dir_edge_blck[:,iii,i1,0]
 
-
-
         msk_on_copy = msk_on_[msk_on_.clone()]
         for ii in range(level):
-            msk_on_copy = msk_on_copy & (k[ii,i1,i2] > 0) & (k[ii,i1,i2] < 1)
+            msk_on_copy[:] = msk_on_copy & ((k[ii,i1,i2] > 0) & (k[ii,i1,i2] < 1)).to(device="cpu")
+
 
         msk_on_[msk_on_.clone()] = msk_on_copy
 
@@ -425,7 +451,6 @@ def pnts_through_edge(level, edge_n, pnts_edge, pnts1, pnts2):
         pnts_end = torch.cat((pnts_end, pnts_path[:, level, i1, i2].to(device="cpu")), dim=1)
 
     return msk_on, pnts_end
-
 
 def pnts_on_edge(pnts_edge, pnts1, pnts2):
 

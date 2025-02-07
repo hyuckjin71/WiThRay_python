@@ -13,6 +13,8 @@ class RIS:
             raise TypeError("'name' must be of type 'str'.")
         self.name = name
 
+        self.nmr = nmr
+
         self.ant_tx = ant_tx
         self.ant_rx = ant_rx
         if ant_tx is None:

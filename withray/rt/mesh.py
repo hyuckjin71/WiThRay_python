@@ -30,8 +30,6 @@ class MESH:
                 file_path = os.path.join(dir_path, f"{file_name}.obj")
                 self.mesh_file = Mesh(file_path)
         else:
-            file_path = os.path.join(dir_path, f"{file_name}.pkl")
-
             file_path = os.path.join(dir_path, f"{file_name}.obj")
             self.mesh_file = Mesh(file_path)
 
@@ -40,15 +38,16 @@ class MESH:
 
             self.v = self.v @ rotation_mat.T
             self.v = self.v
-            self.f = torch.tensor(self.mesh_file.faces(), dtype=torch.long)
-            self.merge_vertices()
+            self.f = torch.tensor(self.triangulate_faces(), dtype=torch.long)
+            # self.merge_vertices()
 
             self.s = self.v[self.f].permute(2,1,0)
             self.n = self.mesh_normals()
 
-            with open(file_path, 'wb') as file:
-                pickle.dump(self.to_serializable_dict(), file)
-                print(f"Saved mesh to {file_path}")
+            # with open(file_path, 'wb') as file:
+            #     file_path = os.path.join(dir_path, f"{file_name}.pkl")
+            #     pickle.dump(self.to_serializable_dict(), file)
+            #     print(f"Saved mesh to {file_path}")
 
         vec1 = self.s[:,1,:] - self.s[:,0,:]
         vec2 = self.s[:,2,:] - self.s[:,1,:]
@@ -72,6 +71,18 @@ class MESH:
 
         file_path = os.path.join(dir_path, f"{file_name}.png")
         self.mesh_file.texture(file_path, scale=1)
+
+    def triangulate_faces(self):
+        triangular_faces = []
+
+        for face in self.mesh_file.faces():
+            if len(face) == 3:
+                triangular_faces.append(face)
+            else:
+                for i in range(1, len(face) - 1):
+                    triangular_faces.append([face[0], face[i], face[i+1]])
+
+        return triangular_faces
 
     def to_serializable_dict(self):
         serializable_dict = {}

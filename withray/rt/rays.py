@@ -22,133 +22,172 @@ class RAYS:
         self.mesh = mesh
         self.device = device
 
-    def collect_rays(self):
+        self.rays = None
+        self.msk_rays = None
+        self
 
-        tx_nodes = [Tx(bs) for bs in self.bs if bs.nmr.dir_link == "up"] + [Tx(ris) for ris in self.ris]
-        rx_nodes = [Rx(ue) for ue in self.ue if ue.nmr.dir_link == "up"] + [Rx(ris) for ris in self.ris]
+    def collect_rays(self, level, num_priority):
+
+        tx_nodes = [Tx(bs) for bs in self.bs if bs.nmr.dir_link == "down"] + [Tx(ue) for ue in self.ue if ue.nmr.dir_link == "up"] + [Tx(ris) for ris in self.ris]
+        rx_nodes = [Rx(ue) for ue in self.ue if ue.nmr.dir_link == "down"] + [Rx(bs) for bs in self.bs if bs.nmr.dir_link == "up"] + [Rx(ris) for ris in self.ris]
 
         for i in range(tx_nodes.__len__()):
             pnts_tx = tx_nodes[i].pnts.reshape(3, -1)
             pnts_rx = [node.pnts for node in rx_nodes if node.name != tx_nodes[i].name]
+
             pnts_rx = torch.cat([pnts.reshape(3, -1) for pnts in pnts_rx], dim=1)
 
             pnts_tx = pnts_tx.to(dtype=torch.float32, device=self.device)
             pnts_rx = pnts_rx.to(dtype=torch.float32, device=self.device)
 
-            msk_in = self.compute_rays(pnts_tx, pnts_rx)
+            rays_, msk_rays_, info_ = self.compute_rays(level, num_priority, pnts_tx, pnts_rx)
 
-    def compute_rays(self, pnts_tx, pnts_rx):
+            idx_rx = 0
+            for ii in range(len(rx_nodes)):
+                for i_rx_ant in range(rx_nodes[ii].pnts.view(3,-1).shape[1]):
 
+                    for i_tx_ant in range(pnts_tx.shape[1]):
+                        for level_ in range(len(rays_[i_tx_ant])):
+                            i1,i2 = torch.where(msk_rays_[i_tx_ant][level_])
+                            msk_rx = i2 == idx_rx
+                            i1 = i1[msk_rx]
+                            i2 = i2[msk_rx]
+
+                            if level_ == 0:
+                                rays_level = (rays_[i_tx_ant][level_][:,:,i1,i2],)
+                                info_level = (info_[i_tx_ant][level_][:,:,i1],)
+                            else:
+                                rays_level = rays_level + (rays_[i_tx_ant][level_][:,:,i1,i2],)
+                                info_level = info_level + (info_[i_tx_ant][level_][:,:,i1],)
+
+                        if i_tx_ant == 0:
+                            rays_tx_ant = (rays_level,)
+                            info_tx_ant = (info_level,)
+                        else:
+                            rays_tx_ant = rays_tx_ant + (rays_level,)
+                            info_tx_ant = info_tx_ant + (info_level,)
+
+                    if i_rx_ant == 0:
+                        rays_rx_ant = (rays_tx_ant,)
+                        info_rx_ant = (info_tx_ant,)
+                    else:
+                        rays_rx_ant = rays_rx_ant + (rays_tx_ant,)
+                        info_rx_ant = info_rx_ant + (info_tx_ant,)
+
+                    idx_rx += 1
+
+                if ii == 0:
+                    rays_rx = (rays_rx_ant,)
+                    info_rx = (info_rx_ant,)
+                else:
+                    rays_rx = rays_rx + (rays_rx_ant,)
+                    info_rx = info_rx + (info_rx_ant,)
+
+            if i == 0:
+                rays = (rays_rx,)
+                info = (info_rx,)
+            else:
+                rays = rays + (rays_rx,)
+                info = info + (info_rx,)
+
+        self.evaluateCIR(rays, info)
+
+        self.rays = rays
+        self.msk_rays = msk_rays
+        self.info = info
+
+    def evaluateCIR(self, rays, info):
+
+        for i_tx in range(len(rays)):
+            for i_rx in range(len(rays[i_tx])):
+                for i_rx_ant in range(len(rays[i_tx][i_rx])):
+                    for i_tx_ant in range(len(rays[i_tx][i_rx][i_rx_ant])):
+                        for level in range(len(rays[i_tx][i_rx][i_rx_ant][i_tx_ant])):
+                            rays_ = rays[i_tx][i_rx][i_rx_ant][i_tx_ant][level]
+                            info_ = info[i_tx][i_rx][i_rx_ant][i_tx_ant][level]
+                            for i in range(level+1):
+                                msk_reflct = info_[i,2,:] == 1
+                                msk_difrct = ~msk_reflct
+
+
+
+    def compute_rays(self, level, num_priority, pnts_tx, pnts_rx):
+
+        idx_rx = 0
         mesh_ = copy.deepcopy(self.mesh)
         mesh_.mesh_to_device("cpu")
 
-        num_priority = torch.tensor(1e3, dtype=torch.int)
+        num_priority = torch.tensor(num_priority, dtype=torch.int)
 
         for i in range(pnts_tx.shape[1]):
             msk_v = ~line_pnt_intersect(pnts_tx[:,i].view(3,1).to(device="cpu"), mesh_.v.T, mesh_)
 
             node_prev = torch.cat([torch.zeros(3,2).to(device=pnts_tx.device), pnts_tx[:,i].view(3,1)], dim=1).view(3,3,1,1)
             info_prev = torch.zeros(1,3, dtype=torch.int32, device=pnts_tx.device).view(1,3,1)
+            node_priority_prev = torch.ones(1)
 
-            plotter = Plotter()
-            plotter += Text3D('Rx', pos=pnts_rx[:, 0].numpy())
-            plotter += Point(pnts_rx[:,0].numpy()).color("red", 1)
-            plotter += Point(pnts_tx[:,0].numpy()).color("red", 1)
+            # plotter = Plotter()
+            # plotter += Text3D('Rx', pos=pnts_rx[:, idx_rx].numpy())
+            # plotter += Point(pnts_rx[:,idx_rx].numpy()).color("red", 1)
+            # plotter += Point(pnts_tx[:,0].numpy()).color("red", 1)
 
-            cache, cache_next, node_priority_prev = self.next_nodes(1, num_priority, node_prev, info_prev, torch.ones(1), msk_v)
-            # cache_next = cache
-            rays, msk_rays,_ = self.find_rays(1, cache, pnts_tx[:,i], pnts_rx)
-            msk_v = self.validity_test(cache_next)
+            for ii in range(level):
+                if ii == 0:
+                    cache, cache_next, node_priority_prev = self.next_nodes(ii+1, num_priority, node_prev, info_prev, node_priority_prev, msk_v)
+                else:
+                    cache, cache_next, node_priority_prev = self.next_nodes(ii+1, num_priority, cache_next.pnts, cache_next.info, node_priority_prev, msk_v)
+                rays_, msk_rays_, msk_rays_blocked_ = self.find_rays(ii+1, cache, pnts_tx[:,i], pnts_rx)
 
-            rays_plot = rays[:,:,msk_rays[:,0],0]
-            for ii in range(rays_plot.shape[2]):
-                plotter += Line(pnts_tx[:,0].numpy(), rays_plot[:,0,ii].numpy()).color("cyan", 1)
-                plotter += Line(rays_plot[:, 0, ii].numpy(), pnts_rx[:, 0].numpy()).color("cyan", 1)
-                plotter += Point(rays_plot[:,0,ii].numpy()).color("cyan",1)
+                if ii == 0:
+                    rays = (rays_,)
+                    msk_rays = (msk_rays_,)
+                    info = (cache.info,)
+                else:
+                    rays = rays + (rays_,)
+                    msk_rays = msk_rays + (msk_rays_,)
+                    info = info + (cache.info,)
 
-            cache, cache_next, node_priority_prev = self.next_nodes(2, num_priority, cache_next.pnts, cache_next.info, node_priority_prev, msk_v)
-            # cache_next = cache
-            rays, msk_rays, _ = self.find_rays(2, cache, pnts_tx[:,i], pnts_rx)
-            msk_v = self.validity_test(cache_next)
+                if ii < level-1:
+                    msk_v = self.validity_test(cache_next, pnts_rx[:,idx_rx])
 
-            rays_plot = rays[:,:,msk_rays[:,0],0]
-            for ii in range(rays_plot.shape[2]):
-                plotter += Line(pnts_tx[:,0].numpy(), rays_plot[:,0,ii].numpy()).color("magenta", 1)
-                plotter += Line(rays_plot[:,0,ii].numpy(), rays_plot[:,1,ii].numpy()).color("magenta", 1)
-                plotter += Line(rays_plot[:,1,ii].numpy(), pnts_rx[:,0].numpy()).color("magenta", 1)
-                plotter += Point(rays_plot[:,0,ii].numpy()).color("magenta",1)
-                plotter += Point(rays_plot[:,1,ii].numpy()).color("magenta",1)
+                # rays_plot = rays_[:, :, msk_rays_[:, idx_rx], idx_rx]
+                # for iii in range(rays_plot.shape[2]):
+                #     plotter += Line(pnts_tx[:, 0].numpy(), rays_plot[:, 0, iii].numpy()).color("cyan", 1)
+                #     plotter += Point(rays_plot[:, 0, iii].numpy()).color("cyan", 1)
+                #     for iv in range(0, ii):
+                #         plotter += Line(rays_plot[:, iv, iii].numpy(), rays_plot[:, iv + 1, iii].numpy()).color("cyan",
+                #                                                                                                 1)
+                #         plotter += Point(rays_plot[:, iv + 1, iii-1].numpy()).color("cyan", 1)
+                #     plotter += Line(rays_plot[:, ii, iii].numpy(), pnts_rx[:, 0].numpy()).color("cyan", 1)
+                #
+                # rays_plot = rays_[:, :, msk_rays_blocked_[:, idx_rx], idx_rx]
+                # for iii in range(rays_plot.shape[2]):
+                #     plotter += Line(pnts_tx[:, 0].numpy(), rays_plot[:, 0, iii].numpy()).color("yellow", 1)
+                #     plotter += Point(rays_plot[:, 0, iii].numpy()).color("yellow", 1)
+                #     for iv in range(0, ii):
+                #         plotter += Line(rays_plot[:, iv, iii].numpy(), rays_plot[:, iv + 1, iii].numpy()).color(
+                #             "yellow",
+                #             1)
+                #         plotter += Point(rays_plot[:, iv + 1, iii].numpy()).color("yellow", 1)
+                #     plotter += Line(rays_plot[:, ii, iii].numpy(), pnts_rx[:, 0].numpy()).color("yellow", 1)
 
-            cache, cache_next, node_priority_prev = self.next_nodes(3, num_priority, cache_next.pnts, cache_next.info, node_priority_prev, msk_v)
-            rays, msk_rays, msk_rays_blocked = self.find_rays(3, cache, pnts_tx[:,i], pnts_rx)
-            msk_v = self.validity_test(cache_next)
+            # p1 = Point([200 * cos(-230 / 180 * PI), 200 * sin(-230 / 180 * PI), 100], c='white')
+            # l1 = Light(p1, c='white')
+            #
+            # self.mesh.mesh_file.cellcolors[:, 3] = self.mesh.mesh_file.cellcolors[:, 3] * 0.8
+            # plotter.add_callback("mouse move", print_mouse_coordinates)
+            # plotter.show(self.mesh.mesh_file, p1, l1).interactive()
 
-            rays_plot = rays[:,:,msk_rays[:,0],0]
-            for ii in range(rays_plot.shape[2]):
-                plotter += Line(pnts_tx[:,0].numpy(), rays_plot[:,0,ii].numpy()).color("blue", 1)
-                plotter += Point(rays_plot[:, 0, ii].numpy()).color("blue", 1)
-                for iii in range(0,2):
-                    plotter += Line(rays_plot[:,iii,ii].numpy(), rays_plot[:,iii+1,ii].numpy()).color("blue", 1)
-                    plotter += Point(rays_plot[:, iii+1, ii].numpy()).color("blue", 1)
-                plotter += Line(rays_plot[:,2,ii].numpy(), pnts_rx[:,0].numpy()).color("blue", 1)
+            if i == 0:
+                rays_cat = (rays,)
+                msk_rays_cat = (msk_rays,)
+                info_cat = (info,)
+            else:
+                rays_cat = rays_cat + (rays,)
+                msk_rays_cat = msk_rays_cat + (msk_rays,)
+                info_cat = info_cat + (info,)
 
-            rays_plot = rays[:, :, msk_rays_blocked[:, 0], 0]
-            for ii in range(rays_plot.shape[2]):
-                plotter += Line(pnts_tx[:, 0].numpy(), rays_plot[:, 0, ii].numpy()).color("yellow", 1)
-                plotter += Point(rays_plot[:, 0, ii].numpy()).color("yellow", 1)
-                for iii in range(0, 2):
-                    plotter += Line(rays_plot[:, iii, ii].numpy(), rays_plot[:, iii + 1, ii].numpy()).color("yellow",
-                                                                                                            1)
-                    plotter += Point(rays_plot[:, iii + 1, ii].numpy()).color("yellow", 1)
-                plotter += Line(rays_plot[:, 2, ii].numpy(), pnts_rx[:, 0].numpy()).color("yellow", 1)
-
-            cache, cache_next, node_priority_prev = self.next_nodes(4, num_priority, cache_next.pnts, cache_next.info, node_priority_prev, msk_v)
-            rays, msk_rays, msk_rays_blocked = self.find_rays(4, cache, pnts_tx[:, i], pnts_rx)
-            msk_v = self.validity_test(cache_next)
-
-            rays_plot = rays[:, :, msk_rays[:, 0], 0]
-            for ii in range(rays_plot.shape[2]):
-                plotter += Line(pnts_tx[:, 0].numpy(), rays_plot[:, 0, ii].numpy()).color("blue", 1)
-                plotter += Point(rays_plot[:, 0, ii].numpy()).color("blue", 1)
-                for iii in range(0, 3):
-                    plotter += Line(rays_plot[:, iii, ii].numpy(), rays_plot[:, iii + 1, ii].numpy()).color("blue",
-                                                                                                            1)
-                    plotter += Point(rays_plot[:, iii + 1, ii].numpy()).color("blue", 1)
-                plotter += Line(rays_plot[:, 3, ii].numpy(), pnts_rx[:, 0].numpy()).color("blue", 1)
-
-            rays_plot = rays[:, :, msk_rays_blocked[:, 0], 0]
-            for ii in range(rays_plot.shape[2]):
-                plotter += Line(pnts_tx[:, 0].numpy(), rays_plot[:, 0, ii].numpy()).color("yellow", 1)
-                plotter += Point(rays_plot[:, 0, ii].numpy()).color("yellow", 1)
-                for iii in range(0, 3):
-                    plotter += Line(rays_plot[:, iii, ii].numpy(), rays_plot[:, iii + 1, ii].numpy()).color(
-                        "yellow",
-                        1)
-                    plotter += Point(rays_plot[:, iii + 1, ii].numpy()).color("yellow", 1)
-                plotter += Line(rays_plot[:, 3, ii].numpy(), pnts_rx[:, 0].numpy()).color("yellow", 1)
-
-            cache, cache_next, node_priority_prev = self.next_nodes(5, 1000, cache_next.pnts, cache_next.info, node_priority_prev, msk_v)
-            rays, msk_rays,_ = self.find_rays(5, cache, pnts_tx[:,i], pnts_rx)
-            # msk_v = self.validity_test(cache_next)
-
-            rays_plot = rays[:,:,msk_rays[:,0],0]
-            for ii in range(rays_plot.shape[2]):
-                plotter += Line(pnts_tx[:,0].numpy(), rays_plot[:,0,ii].numpy()).color("blue", 1)
-                plotter += Point(rays_plot[:, 0, ii].numpy()).color("blue", 1)
-                for iii in range(0,4):
-                    plotter += Line(rays_plot[:,iii,ii].numpy(), rays_plot[:,iii+1,ii].numpy()).color("blue", 1)
-                    plotter += Point(rays_plot[:, iii+1, ii].numpy()).color("blue", 1)
-                plotter += Line(rays_plot[:,4,ii].numpy(), pnts_rx[:,0].numpy()).color("blue", 1)
-
-
-            p1 = Point([200 * cos(-230 / 180 * PI), 200 * sin(-230 / 180 * PI), 60], c='white')
-            l1 = Light(p1, c='white')
-
-            self.mesh.mesh_file.cellcolors[:, 3] = self.mesh.mesh_file.cellcolors[:, 3] * 0.8
-
-            plotter.show(self.mesh.mesh_file, p1, l1)
-
-            return rays
+        return rays_cat, msk_rays_cat, info_cat
 
     def find_rays(self, level, cache, pnts_tx, pnts_rx):
 
@@ -173,7 +212,7 @@ class RAYS:
             else:
                 pnts_end = rays[:,i,msk_node,:]
             rays[:,0:i,msk_node,:], msk_rays_ = pnts_on_surface(mesh_,
-                                                                cache.info[level-1,0,msk_node],
+                                                                cache.info[i-1,0,msk_node],
                                                                 rays[:,0:i,msk_node,:],
                                                                 pnts_end)
             msk_rays[msk_node,:] = msk_rays[msk_node,:] & msk_rays_
@@ -189,7 +228,7 @@ class RAYS:
         )
 
         for i in range(msk_rays.shape[1]):
-            msk_rays[msk_rays[:,i],i] = (
+            msk_rays[msk_rays[:,i].clone(),i] = (
                 msk_rays[msk_rays[:,i],i] &
                 ~line_pnt_intersect(pnts_rx[:,i].view(3, -1), rays[:, -1, msk_rays[:,i], i] ,mesh_)
             )
@@ -200,15 +239,18 @@ class RAYS:
         )
 
         for i in range(msk_rays_blocked.shape[1]):
-            msk_rays_blocked[msk_rays_blocked[:,i],i] = (
+            msk_rays_blocked[msk_rays_blocked[:,i].clone(),i] = (
                 msk_rays_blocked[msk_rays_blocked[:,i],i] &
                 line_pnt_intersect(pnts_rx[:,i].view(3, -1), rays[:, -1, msk_rays_blocked[:,i], i] ,mesh_)
             )
 
+        rays = torch.cat((pnts_tx.view(3,1,1,1).repeat(1,1,rays.shape[2],rays.shape[3]),
+                          rays,
+                          pnts_rx.view(3,1,1,-1).repeat(1,1,rays.shape[2],1)), dim=1)
+
         return rays, msk_rays, msk_rays_blocked
 
-
-    def validity_test(self, cache):
+    def validity_test(self, cache, pnts_rx):
 
         msk_r = cache.info[-1,2,:] == 1
         node_r = cache.pnts[:,:,-1,msk_r]
@@ -225,6 +267,7 @@ class RAYS:
             msk_v_r1 = pnts_through_surfaces(mesh_, info_r[msk_reflct], node_r[:,2,msk_reflct].view(3,-1), mesh_.v.T)
             i1, i2 = torch.where(msk_v_r1)
             dist = 1 / torch.linalg.norm( node_r[:,2,msk_reflct][:,i1] - mesh_.v[i2,:].T.to(device="cpu"), dim=0)
+            dist = dist / torch.linalg.norm( mesh_.v[i2,:].T.to(device="cpu") - pnts_rx.view(3,-1), dim=0)
             _, idx_top_k = torch.topk(dist, min(torch.tensor(1e5, dtype=torch.int), dist.shape[0]))
             msk_updated = torch.zeros_like(msk_v_r1, dtype=torch.bool)
             msk_updated[i1[idx_top_k],i2[idx_top_k]] = True
@@ -235,22 +278,23 @@ class RAYS:
             print("Reflecting points are validated.")
 
             mesh_.mesh_to_device("cpu")
-            msk_v_r1[msk_v_r1.clone()] = ~line_pnt_intersect(node_r[:,2,msk_reflct][:,i1].view(3,-1), mesh_.v[i2,:].T, mesh_, dim=1, idc_f_except=info_r[i1])
+            msk_v_r1[msk_v_r1.clone()] = ~line_pnt_intersect(node_r[:,2,msk_reflct][:,i1].view(3,-1), mesh_.v[i2,:].T, mesh_, dim=1, idc_f_except=info_r[msk_reflct][i1])
             num2 = torch.sum(msk_v_r1)
             msk_v_r[msk_reflct, :] = msk_v_r1
             end_time = time.time()
             print(f"[Level: {cache.info.shape[0]}] Validity Test 1: {num2}/{num1}, Time: {end_time - start_time: .2f} sec")
 
+
         if torch.any(msk_difrct):
             start_time = time.time()
             mesh_.mesh_to_device("mps")
             num_difrct = torch.sum(cache.info[:,2,msk_r][:,msk_difrct] == 2, dim=0)
-            msk_v_r2 = torch.zeros(msk_difrct.sum(), mesh_.v.shape[0], dtype=torch.bool)
+            msk_v_r2 = torch.ones(msk_difrct.sum(), mesh_.v.shape[0], dtype=torch.bool)
             level = cache.info.shape[0]
             for i in range(1, level+1):
                 msk_node = num_difrct == i
                 if msk_node.sum() != 0:
-                    blck_size = torch.ceil(torch.tensor(2e6) / torch.sum(msk_node)).to(dtype=torch.int)
+                    blck_size = torch.ceil(torch.tensor(2e7) / torch.sum(msk_node)).to(dtype=torch.int)
                     ii = 0
                     end_idx = 0
                     pnts_end = torch.zeros(3,0)
@@ -263,15 +307,18 @@ class RAYS:
                         pnts_on_edge_, msk_on = pnts_on_edge(cache.pnts[:,:,:,msk_r][:,:,:,msk_difrct][:,0:2,level-i:level,msk_node],
                                                              cache.pnts[:,:,:,msk_r][:,:,:,msk_difrct][:,2,-1,msk_node],
                                                              mesh_.v[start_idx:end_idx,:].T)
-                        msk_v_r2[msk_node,start_idx:end_idx] = pnts_through_surfaces(mesh_, info_r[msk_difrct][msk_node],
+                        msk_v_r2[msk_node,:] = msk_v_r2[msk_node,:] | pnts_through_surfaces(mesh_, info_r[msk_difrct][msk_node],
                                                                                      pnts_on_edge_[:,-1,:,:],
-                                                                                     mesh_.v[start_idx:end_idx,:].T) & msk_on
+                                                                                     mesh_.v[start_idx:end_idx,:].T, start_idx)
+                        msk_v_r2[msk_node,start_idx:end_idx] = msk_v_r2[msk_node,start_idx:end_idx] & msk_on
+
                         i1, i2 = torch.where(msk_v_r2[msk_node,start_idx:end_idx])
                         pnts_end = torch.cat( (pnts_end, pnts_on_edge_[:,-1,i1,i2]), dim=1)
                         i1_ = torch.cat( (i1_, i1), dim=0)
                         i2_ = torch.cat( (i2_, i2+start_idx), dim=0)
 
                     dist = 1 / torch.linalg.norm( pnts_end - mesh_.v[i2_,:].T.to(device="cpu"), dim=0)
+                    dist = dist / torch.linalg.norm( mesh_.v[i2_,:].T.to(device="cpu") - pnts_rx.view(3,-1), dim=0)
                     _, idx_top_k = torch.topk(dist, min(torch.tensor(1e5, dtype=torch.int),dist.shape[0]))
                     msk_updated = torch.zeros_like(msk_v_r2[msk_node,:], dtype=torch.bool)
                     msk_updated[i1_[idx_top_k],i2_[idx_top_k]] = True
@@ -283,8 +330,8 @@ class RAYS:
 
             mesh_.mesh_to_device("cpu")
             msk_v_r2[msk_v_r2.clone()] = (
-                ~line_pnt_intersect(node_r[:,0,msk_difrct][:,i1].view(3,-1), mesh_.v[i2,:].T, mesh_, dim=1, idc_f_except=info_r[i1]) |
-                ~line_pnt_intersect(node_r[:,1,msk_difrct][:,i1].view(3,-1), mesh_.v[i2,:].T, mesh_, dim=1, idc_f_except=info_r[i1])
+                ~line_pnt_intersect(node_r[:,0,msk_difrct][:,i1].view(3,-1), mesh_.v[i2,:].T, mesh_, dim=1, idc_f_except=info_r[msk_difrct][i1]) |
+                ~line_pnt_intersect(node_r[:,1,msk_difrct][:,i1].view(3,-1), mesh_.v[i2,:].T, mesh_, dim=1, idc_f_except=info_r[msk_difrct][i1])
             )
             num2 = torch.sum(msk_v_r2)
             msk_v_r[msk_difrct, :] = msk_v_r2
@@ -305,6 +352,7 @@ class RAYS:
             msk_v_d[msk_node,:], pnts_end = pnts_through_edge(i, mesh_.n[:,info_d[level-i:level,0,msk_node]].view(3,i,-1), node_d[:,0:2,level-i:level,msk_node], node_d[:,2,-1,msk_node], mesh_.v.T)
             i1, i2 = torch.where(msk_v_d[msk_node,:])
             dist = 1 / torch.linalg.norm( pnts_end - mesh_.v[i2,:].T.to(device="cpu"), dim=0)
+            dist = dist / torch.linalg.norm( mesh_.v[i2,:].T.to(device="cpu") - pnts_rx.view(3,-1), dim=0)
             _, idx_top_k = torch.topk(dist, min(torch.tensor(1e5, dtype=torch.int), dist.shape[0]))
             msk_updated = torch.zeros_like(msk_v_d[msk_node, :], dtype=torch.bool)  # False로 초기화
             msk_updated[i1[idx_top_k], i2[idx_top_k]] = True
@@ -317,8 +365,8 @@ class RAYS:
         mesh_.mesh_to_device("cpu")
         # msk_v_d = v_priority(mesh_, msk_v_d, node_d)
         msk_v_d[msk_v_d.clone()] = (
-            ~line_pnt_intersect(node_d[:,0,-1,:][:,i1].view(3,-1), mesh_.v[i2,:].T, mesh_, dim=1) |
-            ~line_pnt_intersect(node_d[:,1,-1,:][:,i1].view(3,-1), mesh_.v[i2,:].T, mesh_, dim=1)
+            ~line_pnt_intersect(node_d[:,0,-1,:][:,i1].view(3,-1), mesh_.v[i2,:].T, mesh_, dim=1, idc_f_except=info_d[-1,0,:][i1]) |
+            ~line_pnt_intersect(node_d[:,1,-1,:][:,i1].view(3,-1), mesh_.v[i2,:].T, mesh_, dim=1, idc_f_except=info_d[-1,0,:][i1])
         )
 
         num2 = torch.sum(msk_v_d)
@@ -359,7 +407,6 @@ class RAYS:
 
             mesh_v = mesh_.s[:,0,i2].unsqueeze(1)
             mesh_n = mesh_.n[:,i2].unsqueeze(1)
-
 
             # (Reflection from diffraction) ===============================================================================
 
@@ -542,3 +589,7 @@ class RAYS:
         print(f"\n[Level: {level}] VPI Search, Time: {end_time - start_time:.2f} sec")
 
         return cache, cache_next, node_priority
+
+def print_mouse_coordinates(evt):
+    if evt.picked3d is not None:
+        print(f"Mouse Over Coordinates: {evt.picked3d}")

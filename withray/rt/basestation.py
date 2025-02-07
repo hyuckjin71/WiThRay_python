@@ -4,7 +4,7 @@ Classes and Methods for BS.
 import torch
 
 class BS:
-    def __init__(self, name, pnts, dirs,
+    def __init__(self, name, pnts, dirs, dir_pol = None,
                  ant_tx = None,
                  ant_rx = None,
                  nmr = "FR1.n41"):
@@ -26,8 +26,14 @@ class BS:
             if ant_rx is None:
                 self.ant_rx = ant_tx
 
+        assert self.ant_tx.pattern != "patch", "Error: 'patch' cannot be assigned to Tx antenna pattern."
+
         self.pnts = pnts
         self.dirs = dirs
+
+        pol_basis = torch.tensor([[1, 0, 0],[0, 1, 0],[0, 0, 1]])
+        if dir_pol is None:
+            _,idx_max = torch.max(torch.tensor(self.dirs))
 
 
     @property
